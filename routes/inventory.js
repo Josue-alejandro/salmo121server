@@ -1,18 +1,57 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db.js');
+const { sortByName } = require('../js/functions.js')
 
-// Obtener todos los productos
+// Obtener productos con paginación
 router.get('/products', (req, res) => {
-    db.query('SELECT * FROM products', (err, results) => {
-        if (err) {
-            console.error('Error al realizar la consulta', err);
-            return res.status(500).send('Error en el servidor');
-        }
-        
-        res.json(results); // Retornar los productos en formato JSON
-    });
+    let { page = 1, limit = 20, all = false } = req.query;
+
+    page = parseInt(page, 10);
+    limit = parseInt(limit, 10);
+    all = all === 'true'; // Convertir string a booleano
+
+    if (all || limit === 0) {
+        // Si all=true o limit=0, devolver todos los productos sin paginación
+        db.query('SELECT * FROM products', (err, results) => {
+            if (err) {
+                console.error('Error al realizar la consulta', err);
+                return res.status(500).send('Error en el servidor');
+            }
+            res.json({ total: results.length, products: sortByName(results) });
+        });
+    } else {
+        // Si se usa paginación, calcular el offset
+        const offset = (page - 1) * limit;
+
+        // Obtener total de productos para calcular cuántas páginas hay
+        db.query('SELECT COUNT(*) AS total FROM products', (err, countResult) => {
+            if (err) {
+                console.error('Error al obtener el total de productos', err);
+                return res.status(500).send('Error en el servidor');
+            }
+
+            const totalProducts = countResult[0].total;
+
+            // Obtener productos con paginación
+            db.query('SELECT * FROM products LIMIT ? OFFSET ?', [limit, offset], (err, results) => {
+                if (err) {
+                    console.error('Error al realizar la consulta', err);
+                    return res.status(500).send('Error en el servidor');
+                }
+
+                res.json({
+                    total: totalProducts,  // Total de productos en la BD
+                    page: page,            // Página actual
+                    perPage: limit,        // Cantidad de productos por página
+                    totalPages: Math.ceil(totalProducts / limit), // Total de páginas
+                    products: sortByName(results) // Lista de productos paginados
+                });
+            });
+        });
+    }
 });
+
 
 // Obtener el registro
 router.get('/supply', (req, res) => {
@@ -21,8 +60,8 @@ router.get('/supply', (req, res) => {
             console.error('Error al realizar la consulta', err);
             return res.status(500).send('Error en el servidor');
         }
-        
         res.json(results); // Retornar los productos en formato JSON
+
     });
 });
 
@@ -45,7 +84,7 @@ router.post('/products', (req, res) => {
     const { name, stock, category_id, price, price_type } = req.body;
     
     // Validar que todos los campos sean proporcionados
-    if (!name || !stock || !category_id || !price || !price_type) {
+    if (!name || !category_id || !price || !price_type) {
         return res.status(400).send('Faltan datos requeridos');
     }
 
